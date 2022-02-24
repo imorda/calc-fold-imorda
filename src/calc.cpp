@@ -52,12 +52,13 @@ Op parse_op(const std::string & line, std::size_t & i, bool & fold)
         return Op::ERR;
     };
 
-    const auto checkFold = [&i, &line, &fold]() {
+    // Returns ret if fold operation is correct, otherwise Op::ERR
+    const auto validate_fold = [&i, &line, &fold](const Op ret) {
         if (fold && (i >= line.size() || line[i++] != ')')) {
             std::cerr << "Incorrect folded operation specified " << line << std::endl;
-            return false;
+            return Op::ERR;
         }
-        return true;
+        return ret;
     };
 
     if (line[i] == '(') {
@@ -76,37 +77,21 @@ Op parse_op(const std::string & line, std::size_t & i, bool & fold)
     case '8':
     case '9':
         --i; // a first digit is a part of op's argument
-        if (!checkFold())
-            return Op::ERR;
-        return Op::SET;
+        return validate_fold(Op::SET);
     case '+':
-        if (!checkFold())
-            return Op::ERR;
-        return Op::ADD;
+        return validate_fold(Op::ADD);
     case '-':
-        if (!checkFold())
-            return Op::ERR;
-        return Op::SUB;
+        return validate_fold(Op::SUB);
     case '*':
-        if (!checkFold())
-            return Op::ERR;
-        return Op::MUL;
+        return validate_fold(Op::MUL);
     case '/':
-        if (!checkFold())
-            return Op::ERR;
-        return Op::DIV;
+        return validate_fold(Op::DIV);
     case '%':
-        if (!checkFold())
-            return Op::ERR;
-        return Op::REM;
+        return validate_fold(Op::REM);
     case '_':
-        if (!checkFold())
-            return Op::ERR;
-        return Op::NEG;
+        return validate_fold(Op::NEG);
     case '^':
-        if (!checkFold())
-            return Op::ERR;
-        return Op::POW;
+        return validate_fold(Op::POW);
     case 'S':
         switch (line[i++]) {
         case 'Q':
@@ -114,9 +99,7 @@ Op parse_op(const std::string & line, std::size_t & i, bool & fold)
             case 'R':
                 switch (line[i++]) {
                 case 'T':
-                    if (!checkFold())
-                        return Op::ERR;
-                    return Op::SQRT;
+                    return validate_fold(Op::SQRT);
                 default:
                     return rollback(4);
                 }
@@ -176,7 +159,7 @@ bool parse_arg(const std::string & line, std::size_t & i, double & res, const bo
             break;
         case ' ':
             ongoing = false;
-            if (fold) {
+            if (fold) {  // Unit tests only accept trailing whitespaces in folding operations (intended?)
                 break;
             }
         default:
@@ -213,24 +196,24 @@ double unary(const double current, const Op op)
     }
 }
 
-bool binary(const Op op, const double left, const double right, double & res)
+bool n_ary(const Op op, double & left, const double right)
 {
     switch (op) {
     case Op::SET:
-        res = right;
+        left = right;
         return true;
     case Op::ADD:
-        res = left + right;
+        left = left + right;
         return true;
     case Op::SUB:
-        res = left - right;
+        left = left - right;
         return true;
     case Op::MUL:
-        res = left * right;
+        left = left * right;
         return true;
     case Op::DIV:
         if (right != 0) {
-            res = left / right;
+            left = left / right;
             return true;
         }
         else {
@@ -239,7 +222,7 @@ bool binary(const Op op, const double left, const double right, double & res)
         }
     case Op::REM:
         if (right != 0) {
-            res = std::fmod(left, right);
+            left = std::fmod(left, right);
             return true;
         }
         else {
@@ -247,7 +230,7 @@ bool binary(const Op op, const double left, const double right, double & res)
             return false;
         }
     case Op::POW:
-        res = std::pow(left, right);
+        left = std::pow(left, right);
         return true;
     default:
         return false;
@@ -265,7 +248,7 @@ double process_line(const double current, const std::string & line)
     switch (arity(op)) {
     case 2: {
         bool error = false;
-        int argCounter = 0;
+        int arg_counter = 0;
         double newValue = current;
         do {
             i = skip_ws(line, i);
@@ -273,7 +256,7 @@ double process_line(const double current, const std::string & line)
             double arg;
             const bool success = parse_arg(line, i, arg, fold);
             if (i == old_i) {
-                if (fold && i >= line.size() && argCounter >= 1) {
+                if (fold && i >= line.size() && arg_counter >= 1) {  // Trailing whitespaces are ok if there is at least 1 argument
                     break;
                 }
                 std::cerr << "No argument for a binary operation" << std::endl;
@@ -284,8 +267,8 @@ double process_line(const double current, const std::string & line)
                 error = true;
                 break;
             }
-            argCounter++;
-            bool res = binary(op, newValue, arg, newValue);
+            arg_counter++;
+            bool res = n_ary(op, newValue, arg);
             if (!res) {
                 error = true;
                 break;
@@ -306,6 +289,5 @@ double process_line(const double current, const std::string & line)
     }
     default: break;
     }
-
     return current;
 }
