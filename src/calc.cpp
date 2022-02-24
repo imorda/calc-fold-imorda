@@ -159,7 +159,7 @@ bool parse_arg(const std::string & line, std::size_t & i, double & res, const bo
             break;
         case ' ':
             ongoing = false;
-            if (fold) {  // Unit tests only accept trailing whitespaces in folding operations (intended?)
+            if (fold) { // Unit tests only accept trailing whitespaces in folding operations (intended?)
                 break;
             }
         default:
@@ -256,7 +256,7 @@ double process_line(const double current, const std::string & line)
             double arg;
             const bool success = parse_arg(line, i, arg, fold);
             if (i == old_i) {
-                if (fold && i >= line.size() && arg_counter >= 1) {  // Trailing whitespaces are ok if there is at least 1 argument
+                if (fold && i >= line.size() && arg_counter >= 1) { // Trailing whitespaces are ok if there is at least 1 argument
                     break;
                 }
                 std::cerr << "No argument for a binary operation" << std::endl;
