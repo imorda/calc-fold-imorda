@@ -39,16 +39,31 @@ std::size_t arity(const Op op)
     case Op::REM: return 2;
     case Op::POW: return 2;
     }
-    return 0;
 }
 
-Op parse_op(const std::string & line, std::size_t & i)
+Op parse_op(const std::string & line, std::size_t & i, bool & fold)
 {
-    const auto rollback = [&i, &line](const std::size_t n) {
+    const auto rollback = [&i, &line, &fold](const std::size_t n) {
+        if (fold) {
+            i--;
+        }
         i -= n;
         std::cerr << "Unknown operation " << line << std::endl;
         return Op::ERR;
     };
+
+    const auto checkFold = [&i, &line, &fold]() {
+        if (fold && (i >= line.size() || line[i++] != ')')) {
+            std::cerr << "Incorrect folded operation specified " << line << std::endl;
+            return false;
+        }
+        return true;
+    };
+
+    if (line[i] == '(') {
+        fold = true;
+        i++;
+    }
     switch (line[i++]) {
     case '0':
     case '1':
@@ -61,20 +76,36 @@ Op parse_op(const std::string & line, std::size_t & i)
     case '8':
     case '9':
         --i; // a first digit is a part of op's argument
+        if (!checkFold())
+            return Op::ERR;
         return Op::SET;
     case '+':
+        if (!checkFold())
+            return Op::ERR;
         return Op::ADD;
     case '-':
+        if (!checkFold())
+            return Op::ERR;
         return Op::SUB;
     case '*':
+        if (!checkFold())
+            return Op::ERR;
         return Op::MUL;
     case '/':
+        if (!checkFold())
+            return Op::ERR;
         return Op::DIV;
     case '%':
+        if (!checkFold())
+            return Op::ERR;
         return Op::REM;
     case '_':
+        if (!checkFold())
+            return Op::ERR;
         return Op::NEG;
     case '^':
+        if (!checkFold())
+            return Op::ERR;
         return Op::POW;
     case 'S':
         switch (line[i++]) {
@@ -83,6 +114,8 @@ Op parse_op(const std::string & line, std::size_t & i)
             case 'R':
                 switch (line[i++]) {
                 case 'T':
+                    if (!checkFold())
+                        return Op::ERR;
                     return Op::SQRT;
                 default:
                     return rollback(4);
@@ -106,14 +139,15 @@ std::size_t skip_ws(const std::string & line, std::size_t i)
     return i;
 }
 
-double parse_arg(const std::string & line, std::size_t & i)
+bool parse_arg(const std::string & line, std::size_t & i, double & res, const bool fold)
 {
-    double res = 0;
+    res = 0;
     std::size_t count = 0;
     bool good = true;
+    bool ongoing = true;
     bool integer = true;
     double fraction = 1;
-    while (good && i < line.size() && count < max_decimal_digits) {
+    while (ongoing && good && i < line.size() && count < max_decimal_digits) {
         switch (line[i]) {
         case '0':
         case '1':
@@ -140,6 +174,11 @@ double parse_arg(const std::string & line, std::size_t & i)
             integer = false;
             ++i;
             break;
+        case ' ':
+            ongoing = false;
+            if (fold) {
+                break;
+            }
         default:
             good = false;
             break;
@@ -147,11 +186,13 @@ double parse_arg(const std::string & line, std::size_t & i)
     }
     if (!good) {
         std::cerr << "Argument parsing error at " << i << ": '" << line.substr(i) << "'" << std::endl;
+        return false;
     }
-    else if (i < line.size()) {
+    else if (i < line.size() && count >= max_decimal_digits) {
         std::cerr << "Argument isn't fully parsed, suffix left: '" << line.substr(i) << "'" << std::endl;
+        return false;
     }
-    return res;
+    return true;
 }
 
 double unary(const double current, const Op op)
@@ -172,37 +213,44 @@ double unary(const double current, const Op op)
     }
 }
 
-double binary(const Op op, const double left, const double right)
+bool binary(const Op op, const double left, const double right, double & res)
 {
     switch (op) {
     case Op::SET:
-        return right;
+        res = right;
+        return true;
     case Op::ADD:
-        return left + right;
+        res = left + right;
+        return true;
     case Op::SUB:
-        return left - right;
+        res = left - right;
+        return true;
     case Op::MUL:
-        return left * right;
+        res = left * right;
+        return true;
     case Op::DIV:
         if (right != 0) {
-            return left / right;
+            res = left / right;
+            return true;
         }
         else {
             std::cerr << "Bad right argument for division: " << right << std::endl;
-            return left;
+            return false;
         }
     case Op::REM:
         if (right != 0) {
-            return std::fmod(left, right);
+            res = std::fmod(left, right);
+            return true;
         }
         else {
             std::cerr << "Bad right argument for remainder: " << right << std::endl;
-            return left;
+            return false;
         }
     case Op::POW:
-        return std::pow(left, right);
+        res = std::pow(left, right);
+        return true;
     default:
-        return left;
+        return false;
     }
 }
 
@@ -211,20 +259,43 @@ double binary(const Op op, const double left, const double right)
 double process_line(const double current, const std::string & line)
 {
     std::size_t i = 0;
-    const auto op = parse_op(line, i);
+    bool fold = false;
+    const auto op = parse_op(line, i, fold);
+
     switch (arity(op)) {
     case 2: {
-        i = skip_ws(line, i);
-        const auto old_i = i;
-        const auto arg = parse_arg(line, i);
-        if (i == old_i) {
-            std::cerr << "No argument for a binary operation" << std::endl;
+        bool error = false;
+        int argCounter = 0;
+        double newValue = current;
+        do {
+            i = skip_ws(line, i);
+            auto old_i = i;
+            double arg;
+            const bool success = parse_arg(line, i, arg, fold);
+            if (i == old_i) {
+                if (fold && i >= line.size() && argCounter >= 1) {
+                    break;
+                }
+                std::cerr << "No argument for a binary operation" << std::endl;
+                error = true;
+                break;
+            }
+            else if (!success) {
+                error = true;
+                break;
+            }
+            argCounter++;
+            bool res = binary(op, newValue, arg, newValue);
+            if (!res) {
+                error = true;
+                break;
+            }
+        } while (fold && i < line.size());
+
+        if (error) {
             break;
         }
-        else if (i < line.size()) {
-            break;
-        }
-        return binary(op, current, arg);
+        return newValue;
     }
     case 1: {
         if (i < line.size()) {
@@ -235,5 +306,6 @@ double process_line(const double current, const std::string & line)
     }
     default: break;
     }
+
     return current;
 }
