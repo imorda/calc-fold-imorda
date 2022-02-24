@@ -157,13 +157,13 @@ bool parse_arg(const std::string & line, std::size_t & i, double & res, const bo
             integer = false;
             ++i;
             break;
-        case ' ':
-            ongoing = false;
-            if (fold) { // Unit tests only accept trailing whitespaces in folding operations (intended?)
-                break;
-            }
         default:
-            good = false;
+            if (fold && std::isspace(line[i])) { // Also accept whitespaces when operation is folding
+                ongoing = false;                 // Exit loop without throwing any errors
+            }
+            else {
+                good = false; // Exit with error
+            }
             break;
         }
     }
@@ -249,10 +249,10 @@ double process_line(const double current, const std::string & line)
     case 2: {
         bool error = false;
         int arg_counter = 0;
-        double newValue = current;
+        double new_value = current;
         do {
             i = skip_ws(line, i);
-            auto old_i = i;
+            const auto old_i = i;
             double arg;
             const bool success = parse_arg(line, i, arg, fold);
             if (i == old_i) {
@@ -268,7 +268,7 @@ double process_line(const double current, const std::string & line)
                 break;
             }
             arg_counter++;
-            bool res = n_ary(op, newValue, arg);
+            bool res = n_ary(op, new_value, arg);
             if (!res) {
                 error = true;
                 break;
@@ -278,7 +278,7 @@ double process_line(const double current, const std::string & line)
         if (error) {
             break;
         }
-        return newValue;
+        return new_value;
     }
     case 1: {
         if (i < line.size()) {
